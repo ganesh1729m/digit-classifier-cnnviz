@@ -39,3 +39,4 @@ Thumbs.db
 # Models / large files
 models/*.pt
 models/*.pth
+data/
