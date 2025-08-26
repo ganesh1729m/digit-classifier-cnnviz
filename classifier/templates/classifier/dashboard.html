@@ -1,0 +1,186 @@
+{% extends "classifier/base.html" %}
+{% load static %}
+
+{% block title %}Dashboard - Digit Classifier{% endblock %}
+
+{% block extra_head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+    .heatmap-img { border:1px solid #ccc; }
+    .chart-container { max-width: 600px; margin: 10px auto; }
+    table { text-align:center; }
+    button { padding:5px 10px; cursor:pointer; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h2 style="text-align:center; margin-bottom:20px;">User Dashboard</h2>
+
+<h3>Predictions</h3>
+{% if predictions %}
+<div style="overflow-x:auto; margin-bottom:30px;">
+    <table style="width:100%; border-collapse:collapse;">
+        <thead style="background:#f2f2f2;">
+            <tr>
+                <th>ID</th>
+                {% if is_admin %}<th>User</th>{% endif %}
+                <th>Canvas</th>
+                <th>Heatmap</th>
+                <th>Predicted</th>
+                <th>Confidence</th>
+                <th>Timestamp</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for p in predictions %}
+            <tr id="prediction-row-{{ p.id }}" style="border-bottom:1px solid #ddd;">
+                <td>{{ p.id }}</td>
+                {% if is_admin %}
+                <td>{{ p.user.username|default:"Anonymous" }}</td>
+                {% endif %}
+                <td><img src="{{ p.canvas_image.url }}" width="80"/></td>
+                <td>
+                    {% if p.heatmap_image %}
+                    <img src="{{ p.heatmap_image.url }}" class="heatmap-img" width="80"/>
+                    {% else %}
+                    <img class="heatmap-img" width="80" style="display:none;"/>
+                    {% endif %}
+                </td>
+                <td class="predicted-class">{{ p.predicted_class }}</td>
+                <td class="confidence">{{ p.confidence|floatformat:2 }}</td>
+                <td>{{ p.created_at|date:"Y-m-d H:i" }}</td>
+                <td>
+                    <button onclick="rerunPrediction('{{ p.id }}')">Re-run</button>
+                </td>
+            </tr>
+            <tr>
+                <td colspan="{{ is_admin|yesno:'8,7' }}">
+                    <div class="chart-container">
+                        <canvas id="probChart-{{ p.id }}" width="600" height="150"></canvas>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<p>No predictions yet.</p>
+{% endif %}
+
+<h3>Reports</h3>
+{% if reports %}
+<div style="overflow-x:auto;">
+    <table style="width:100%; border-collapse:collapse;">
+        <thead style="background:#f2f2f2;">
+            <tr>
+                <th>ID</th>
+                {% if is_admin %}<th>User</th>{% endif %}
+                <th>Prediction ID</th>
+                <th>Canvas</th>
+                <th>Heatmap</th>
+                <th>Reason</th>
+                <th>Timestamp</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in reports %}
+            <tr id="report-row-{{ r.id }}" style="border-bottom:1px solid #ddd;">
+                <td>{{ r.id }}</td>
+                {% if is_admin %}
+                <td>{{ r.user.username|default:"Anonymous" }}</td>
+                {% endif %}
+                <td>{{ r.prediction.id }}</td>
+                <td><img src="{{ r.prediction.canvas_image.url }}" width="80"/></td>
+                <td>
+                    {% if r.prediction.heatmap_image %}
+                    <img src="{{ r.prediction.heatmap_image.url }}" class="heatmap-img" width="80"/>
+                    {% else %}
+                    <img class="heatmap-img" width="80" style="display:none;"/>
+                    {% endif %}
+                </td>
+                <td class="report-reason">{{ r.reason }}</td>
+                <td>{{ r.created_at|date:"Y-m-d H:i" }}</td>
+                <td>
+                    <button onclick="rerunReport('{{ r.id }}', '{{ r.prediction.id }}')">Re-run</button>
+                </td>
+            </tr>
+            <tr>
+                <td colspan="{{ is_admin|yesno:'8,7' }}">
+                    <div class="chart-container">
+                        <canvas id="probChart-report-{{ r.id }}" width="600" height="150"></canvas>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<p>No reports yet.</p>
+{% endif %}
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const csrftoken = document.cookie.split('; ').find(row => row.startsWith('csrftoken='))?.split('=')[1] || '';
+const charts = {};
+
+function updateChart(probabilities, canvasId) {
+    const ctx = document.getElementById(canvasId).getContext('2d');
+    if (charts[canvasId]) charts[canvasId].destroy();
+    charts[canvasId] = new Chart(ctx, {
+        type: 'bar',
+        data: { labels: [...Array(10).keys()], datasets: [{ label: 'Probability', data: probabilities, backgroundColor: 'rgba(54,162,235,0.6)' }] },
+        options: { scales: { y: { beginAtZero: true, max: 1 } }, animation: false }
+    });
+}
+
+// Initialize charts
+{% for p in predictions %}
+{% if p.probabilities %}
+updateChart({{ p.probabilities|safe }}, "probChart-{{ p.id }}");
+{% endif %}
+{% endfor %}
+{% for r in reports %}
+{% if r.prediction.probabilities %}
+updateChart({{ r.prediction.probabilities|safe }}, "probChart-report-{{ r.id }}");
+{% endif %}
+{% endfor %}
+
+// Re-run prediction
+async function rerunPrediction(predictionId) {
+    try {
+        const resp = await fetch('{% url "rerun_prediction" 0 %}'.replace('0', predictionId), { method: 'POST', headers: { 'X-CSRFToken': csrftoken } });
+        const json = await resp.json();
+        if (!json.success) { alert("❌ Re-run failed: " + json.message); return; }
+
+        const row = document.getElementById(`prediction-row-${predictionId}`);
+        row.querySelector('.predicted-class').innerText = json.predicted_class;
+        row.querySelector('.confidence').innerText = (json.confidence).toFixed(2);
+        const hm = row.querySelector('.heatmap-img');
+        if (json.heatmap_url) { hm.src = json.heatmap_url; hm.style.display = 'inline'; }
+        updateChart(json.probabilities, `probChart-${predictionId}`);
+        alert("✅ Prediction re-run successful!");
+    } catch(err) { console.error(err); alert("Error re-running prediction: " + err); }
+}
+
+// Re-run report (uses prediction ID)
+async function rerunReport(reportId, predictionId) {
+    try {
+        const resp = await fetch('{% url "rerun_prediction" 0 %}'.replace('0', predictionId), { method: 'POST', headers: { 'X-CSRFToken': csrftoken } });
+        const json = await resp.json();
+        if (!json.success) { alert("❌ Re-run failed: " + json.message); return; }
+
+        const row = document.getElementById(`report-row-${reportId}`);
+        row.querySelector('.report-reason').innerText = json.reason || row.querySelector('.report-reason').innerText;
+        const hm = row.querySelector('.heatmap-img');
+        if (json.heatmap_url) { hm.src = json.heatmap_url; hm.style.display = 'inline'; }
+        updateChart(json.probabilities, `probChart-report-${reportId}`);
+        alert("✅ Report re-run successful!");
+    } catch(err) { console.error(err); alert("Error re-running report: " + err); }
+}
+</script>
+{% endblock %}
