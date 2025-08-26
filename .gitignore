@@ -19,7 +19,7 @@ media/
 staticfiles/
 
 # Django migrations
-migrations/
+classifier/migrations/
 
 
 # Logs

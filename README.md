@@ -54,7 +54,7 @@ CNNVIZ/
 ### 1️⃣ Clone the repository
 
 ```bash
-git clone https://github.com/your-username/CNNViz.git
+git https://github.com/ganesh1729m/digit-classifier-cnnviz.git
 cd CNNViz
 ```
 
